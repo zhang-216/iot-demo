@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT 温度实时监控</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="title-block">
+        <h1>温度实时监控</h1>
+        <p class="meta">
+          <span id="topic">iot/demo/temperature</span>
+          <span class="sep">·</span>
+          <span id="broker">mqtt://localhost:1883</span>
+        </p>
+      </div>
+      <div class="status" id="status" data-state="connecting">
+        <span class="status-dot"></span>
+        <span id="status-text">连接中…</span>
+      </div>
+    </header>
+
+    <section class="stats">
+      <article class="card primary">
+        <span class="label">当前温度</span>
+        <strong class="value" id="current">--<small>°C</small></strong>
+      </article>
+      <article class="card">
+        <span class="label">最高</span>
+        <strong class="value" id="max">--</strong>
+      </article>
+      <article class="card">
+        <span class="label">最低</span>
+        <strong class="value" id="min">--</strong>
+      </article>
+      <article class="card">
+        <span class="label">平均</span>
+        <strong class="value" id="avg">--</strong>
+      </article>
+      <article class="card">
+        <span class="label">样本数</span>
+        <strong class="value" id="count">0</strong>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>温度趋势</h2>
+        <span class="hint">最近 60 条 · 每 2 秒更新</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+        <div class="empty" id="empty">等待数据…</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>最新记录</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>时间</th><th>温度 (°C)</th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
