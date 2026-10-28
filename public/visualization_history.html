@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>温湿度历史数据 - ECharts</title>
+  <script src="/vendor/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0f16;
+      --panel: #111a24;
+      --panel-line: #1d2b3a;
+      --text: #e8eff7;
+      --muted: #8095ab;
+      --temp: #f97316;
+      --humi: #38bdf8;
+      --accent: #2dd4bf;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(900px 500px at 15% -10%, rgba(45, 212, 191, 0.12), transparent 60%),
+                  radial-gradient(700px 400px at 100% 0%, rgba(56, 189, 248, 0.08), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; }
+    .meta { margin: 0; font-size: 13px; color: var(--muted); font-family: Consolas, monospace; }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      background: var(--panel);
+      border: 1px solid var(--panel-line);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.active {
+      background: rgba(45, 212, 191, 0.12);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-line);
+      border-radius: 16px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .stat {
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--panel-line);
+    }
+
+    .stat-label { font-size: 12px; color: var(--muted); letter-spacing: 0.4px; }
+    .stat-value { font-size: 22px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+    .chart-wrap { height: 460px; width: 100%; }
+
+    .loading, .empty, .error {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .error { color: var(--danger, #f87171); }
+
+    .foot {
+      text-align: right;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .chart-wrap { height: 340px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <h1>温湿度历史数据</h1>
+        <p class="meta">数据源: GET /api/history · ECharts 渲染</p>
+      </div>
+      <div class="toolbar">
+        <button class="btn" data-limit="100">最近 100</button>
+        <button class="btn active" data-limit="500">最近 500</button>
+        <button class="btn" data-limit="2000">最近 2000</button>
+        <button class="btn" id="btn-refresh">🔄 刷新</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div id="chart" class="chart-wrap"></div>
+      <div id="chart-fallback" class="loading" hidden>加载中…</div>
+    </section>
+
+    <section class="panel">
+      <div class="stats" id="stats">
+        <div class="stat"><div class="stat-label">样本总数</div><div class="stat-value" id="stat-count">--</div></div>
+        <div class="stat"><div class="stat-label">温度 均值 / 最高 / 最低</div><div class="stat-value" id="stat-temp">--</div></div>
+        <div class="stat"><div class="stat-label">湿度 均值 / 最高 / 最低</div><div class="stat-value" id="stat-humi">--</div></div>
+        <div class="stat"><div class="stat-label">时间范围</div><div class="stat-value" id="stat-range" style="font-size:14px">--</div></div>
+      </div>
+    </section>
+
+    <p class="foot">ECharts 5.5.1 · 从 /api/history 拉取数据</p>
+  </div>
+
+  <script>
+    const chartDom = document.getElementById('chart');
+    const chart = echarts.init(chartDom, 'dark');
+
+    const state = { limit: 500, rows: [] };
+
+    const statEls = {
+      count: document.getElementById('stat-count'),
+      temp: document.getElementById('stat-temp'),
+      humi: document.getElementById('stat-humi'),
+      range: document.getElementById('stat-range'),
+    };
+
+    // ---- 图表选项 ----
+    function buildOption(rows) {
+      // rows 按时间倒序返回，画正序折线需反转
+      const ordered = [...rows].reverse();
+
+      const times = ordered.map((r) =>
+        new Date(r.timestamp).toLocaleString('zh-CN', { hour12: false })
+      );
+      const temps = ordered.map((r) => r.temperature);
+      const humis = ordered.map((r) => r.humidity);
+
+      return {
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          backgroundColor: 'rgba(17, 26, 36, 0.95)',
+          borderColor: '#1d2b3a',
+          textStyle: { color: '#e8eff7' },
+        },
+        legend: {
+          data: ['温度 (°C)', '湿度 (%)'],
+          textStyle: { color: '#c7d5e4' },
+          top: 8,
+        },
+        grid: { left: 54, right: 54, top: 48, bottom: 56, containLabel: false },
+        xAxis: {
+          type: 'category',
+          data: times,
+          axisLine: { lineStyle: { color: '#2b3a4a' } },
+          axisLabel: {
+            color: '#8095ab',
+            hideOverlap: true,
+            fontSize: 11,
+          },
+          splitLine: { show: false },
+        },
+        yAxis: [
+          {
+            type: 'value',
+            name: '温度 °C',
+            nameTextStyle: { color: '#f97316' },
+            axisLine: { show: true, lineStyle: { color: '#f97316', width: 1 } },
+            axisLabel: { color: '#f97316' },
+            splitLine: { lineStyle: { color: 'rgba(148,163,184,0.10)' } },
+          },
+          {
+            type: 'value',
+            name: '湿度 %',
+            nameTextStyle: { color: '#38bdf8' },
+            axisLine: { show: true, lineStyle: { color: '#38bdf8', width: 1 } },
+            axisLabel: { color: '#38bdf8' },
+            splitLine: { show: false },
+          },
+        ],
+        dataZoom: [
+          { type: 'inside', start: 0, end: 100 },
+          { type: 'slider', height: 22, bottom: 10,
+            borderColor: '#1d2b3a',
+            fillerColor: 'rgba(45,212,191,0.18)',
+            handleStyle: { color: '#2dd4bf' },
+            textStyle: { color: '#8095ab' },
+          },
+        ],
+        series: [
+          {
+            name: '温度 (°C)',
+            type: 'line',
+            data: temps,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 5,
+            lineStyle: { color: '#f97316', width: 2 },
+            itemStyle: { color: '#f97316' },
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(249,115,22,0.25)' },
+                { offset: 1, color: 'rgba(249,115,22,0.02)' },
+              ]),
+            },
+          },
+          {
+            name: '湿度 (%)',
+            type: 'line',
+            yAxisIndex: 1,
+            data: humis,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 5,
+            lineStyle: { color: '#38bdf8', width: 2 },
+            itemStyle: { color: '#38bdf8' },
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(56,189,248,0.25)' },
+                { offset: 1, color: 'rgba(56,189,248,0.02)' },
+              ]),
+            },
+          },
+        ],
+      };
+    }
+
+    function renderStats(rows) {
+      if (!rows.length) {
+        Object.values(statEls).forEach((el) => (el.textContent = '无数据'));
+        return;
+      }
+      const temps = rows.map((r) => r.temperature);
+      const humis = rows.map((r) => r.humidity);
+      const avg = (arr) => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+      const lo = new Date(rows[rows.length - 1].timestamp).toLocaleString('zh-CN', { hour12: false });
+      const hi = new Date(rows[0].timestamp).toLocaleString('zh-CN', { hour12: false });
+
+      statEls.count.textContent = rows.length;
+      statEls.temp.textContent = `${avg(temps)} / ${Math.max(...temps).toFixed(1)} / ${Math.min(...temps).toFixed(1)}`;
+      statEls.humi.textContent = `${avg(humis)} / ${Math.max(...humis).toFixed(1)} / ${Math.min(...humis).toFixed(1)}`;
+      statEls.range.innerHTML = `<div style="color:#f97316">${hi}</div><div style="color:#38bdf8;margin-top:2px">→ ${lo}</div>`;
+    }
+
+    async function load() {
+      chart.showLoading('默认', { textColor: '#8095ab', maskColor: 'rgba(10,15,22,0.6)' });
+      try {
+        const res = await fetch(`/api/history?limit=${state.limit}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        state.rows = data.rows || [];
+
+        if (state.rows.length === 0) {
+          chart.hideLoading();
+          chart.clear();
+          chart.setOption({
+            title: {
+              text: '暂无数据，请先运行 publisher.js',
+              left: 'center', top: 'middle',
+              textStyle: { color: '#8095ab', fontWeight: 400, fontSize: 14 },
+            },
+          });
+          renderStats([]);
+          return;
+        }
+
+        chart.setOption(buildOption(state.rows), true);
+        renderStats(state.rows);
+      } catch (err) {
+        chart.hideLoading();
+        chart.clear();
+        chart.setOption({
+          title: {
+            text: `加载失败: ${err.message}`,
+            left: 'center', top: 'middle',
+            textStyle: { color: '#f87171', fontWeight: 400, fontSize: 14 },
+          },
+        });
+      }
+    }
+
+    // ---- 事件 ----
+    document.querySelectorAll('.btn[data-limit]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.btn[data-limit]').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.limit = Number(btn.dataset.limit);
+        load();
+      });
+    });
+
+    document.getElementById('btn-refresh').addEventListener('click', load);
+    window.addEventListener('resize', () => chart.resize());
+
+    // 每 10 秒自动刷新
+    setInterval(load, 10000);
+
+    load();
+  </script>
+</body>
+</html>
